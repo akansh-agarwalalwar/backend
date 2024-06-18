@@ -91,10 +91,8 @@ async function ensureTableExists() {
     CREATE TABLE IF NOT EXISTS allperiodsThirtySecond (
     id INT AUTO_INCREMENT PRIMARY KEY,
     periodNumber VARCHAR(255) NOT NULL,
-    periodDate DATE,
-    periodTime VARCHAR(255),
-    colorWinner VARCHAR(255) NOT NULL,
-    numberWinner VARCHAR(255) NOT NULL
+    periodDate DATE NOT NULL,
+    colorWinner VARCHAR(255) NOT NULL
     );
     `;
 
@@ -102,22 +100,31 @@ async function ensureTableExists() {
     console.log("Table 'All Periods Thirty Second' ensured in the database");
 
     const createAllUserPeriodsTableThirtySecond = `
-    CREATE TABLE IF NOT EXISTS alluserperiodsThirtySecond (
+    CREATE TABLE IF NOT EXISTS alluserperiodsThirtySecond ( 
     id INT AUTO_INCREMENT PRIMARY KEY,
     IDOfUser BIGINT,
-    periodNumber VARCHAR(255) NOT NULL,
+    periodNumber VARCHAR(255) NOT NULL, 
     periodDate DATE NOT NULL,
-    periodTime VARCHAR(255) NOT NULL,
-    betType ENUM('number','color'),
+    betType ENUM('color'),
     berforeBetAmount BIGINT NOT NULL,
     betAmount BIGINT NOT NULL,
-    afterBetAmount BIGINT NOT NULL,
+    afterBetAmount BIGINT ,
     status ENUM('win', 'lose')
-  ); 
+  );
     `;
-
     await con.execute(createAllUserPeriodsTableThirtySecond);
     console.log("Table 'Thirty Second User Table' ensured in the database");
+
+    const countPeriodAndTime = `
+  CREATE TABLE IF NOT EXISTS countperiodandtime (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    periodNumber VARCHAR(255) NOT NULL,
+    periodTime Time NOT NULL, 
+    periodDate DATE NOT NULL
+  );
+`;
+await con.execute(countPeriodAndTime);
+    
 
     const createWithdrawHistory = `
     CREATE TABLE IF NOT EXISTS withdrawhistory (
@@ -606,7 +613,7 @@ app.get("/api/withdrawl/history", async (req, res) => {
     console.error("Error fetching withdrawal payments:", error);
     res.status(500).send("Error fetching withdrawal payments.");
   }
-}); 
+});
 app.get("/api/show/withdrawl/history", async (req, res) => {
   const userId = req.query.userId;
   if (!userId) {
@@ -615,7 +622,7 @@ app.get("/api/show/withdrawl/history", async (req, res) => {
   }
   try {
     const [rows] = await con.execute(
-      'SELECT amount, withdrawDate,status FROM withdrawhistory WHERE userId = ?',
+      "SELECT amount, withdrawDate,status FROM withdrawhistory WHERE userId = ?",
       [userId]
     );
     res.json(rows);
@@ -699,10 +706,10 @@ app.post("/api/withdrawals/deny", async (req, res) => {
     const newBalance = currentBalance + withdrawalAmount;
 
     // Update the user's balance
-    await con.execute(
-      "UPDATE register SET balance = ? WHERE IDOfUser = ?",
-      [newBalance.toFixed(2), userId]
-    );
+    await con.execute("UPDATE register SET balance = ? WHERE IDOfUser = ?", [
+      newBalance.toFixed(2),
+      userId,
+    ]);
 
     res.status(200).send({ message: "Withdrawal denied and balance updated" });
   } catch (error) {
@@ -787,6 +794,74 @@ app.get("/api/invite/refer/:userId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching referrals:", error);
     res.status(500).send("Error fetching referrals");
+  }
+});
+
+app.post("/place-bet", async (req, res) => {
+  const {
+    userId,
+    periodNumber,
+    periodDate,
+    betType,
+    berforeBetAmount,
+    betAmount,
+  } = req.body;
+  console.log(
+    userId,
+    periodNumber,
+    periodDate,
+    betType,
+    berforeBetAmount,
+    betAmount
+  );
+
+  const newBalance = berforeBetAmount - betAmount;
+  try {
+    const [result] = await con.execute(
+      `INSERT INTO alluserperiodsThirtySecond (IDOfUser, periodNumber, periodDate, betType, berforeBetAmount, betAmount)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, periodNumber, periodDate, betType, berforeBetAmount, betAmount]
+    );
+    const [balanceResult] = await con.execute(
+      `UPDATE register SET balance = ? WHERE IDOfUser = ?`,
+      [newBalance, userId]
+    );
+    res
+      .status(200)
+      .json({ message: "Bet placed successfully", id: result.insertId });
+  } catch (error) {
+    console.error("Error placing bet:", error);
+    res.status(500).json({ error: "Error placing bet" });
+  }
+});
+
+app.post('/period-timer/post', async (req, res) => {
+  const { periodNumber, periodDate } = req.body;
+  try {
+    const [result] = await con.execute(
+      `INSERT INTO allperiodsthirtysecond (periodNumber, periodDate, colorWinner) VALUES (?, ?, ?)`,
+      [periodNumber, periodDate, '']
+    );
+    res.status(200).json({ message: "Period submitted successfully", id: result.insertId });
+  } catch (err) {
+    console.error("Error inserting period: ", err);
+    res.status(500).json({ error: "Error inserting period" });
+  } 
+}); 
+   
+app.get('/period-timer', async (req, res) => {
+  try {
+    const [rows] = await con.execute(
+      `SELECT periodNumber FROM allperiodsthirtysecond ORDER BY periodNumber DESC LIMIT 1`
+    );
+    if (rows.length > 0) {
+      res.status(200).json({ periodNumber: rows[0].periodNumber });
+    } else {
+      res.status(200).json({ periodNumber: 100000000 }); // Default start period if no records found
+    }
+  } catch (err) {
+    console.error("Error fetching periods: ", err);
+    res.status(500).json({ error: "Error fetching periods" });
   }
 });
 
