@@ -5,12 +5,14 @@ const bodyParser = require("body-parser");
 const nodemailer = require("nodemailer");
 const otpGenerator = require("otp-generator");
 const cookieParser = require("cookie-parser");
+const morgan = require("morgan");
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cookieParser());
 const dotenv = require("dotenv");
 dotenv.config();
+// app.use(morgan('dev'))
 
 app.use(express.json());
 const corsOptions = {
@@ -46,7 +48,7 @@ async function ensureTableExists() {
         referenceCode VARCHAR(10),
         IDOfUser VARCHAR(10),
         userReferenceCode VARCHAR(10),
-        balance DECIMAL(10, 2) DEFAULT 0
+        balance DECIMAL(10,2)
       );
     `;
     await con.execute(createRegisterTableQuery);
@@ -56,7 +58,7 @@ async function ensureTableExists() {
       CREATE TABLE IF NOT EXISTS uploadimages (
         id INT AUTO_INCREMENT PRIMARY KEY,
         userId BIGINT,
-        amount DECIMAL(10, 2),
+        amount DECIMAL(10,2),
         status ENUM('pending', 'approved', 'denied') DEFAULT 'pending'
       );
     `;
@@ -78,7 +80,7 @@ async function ensureTableExists() {
     CREATE TABLE IF NOT EXISTS rechargehistory (
     id INT AUTO_INCREMENT PRIMARY KEY,
     userId BIGINT,
-    amount DECIMAL(10, 2),
+    amount DECIMAL(10,2),
     rechargeDate DATE,
     status ENUM('approved', 'denied')
   );
@@ -100,17 +102,19 @@ async function ensureTableExists() {
     console.log("Table 'All Periods Thirty Second' ensured in the database");
 
     const createAllUserPeriodsTableThirtySecond = `
-    CREATE TABLE IF NOT EXISTS alluserperiodsThirtySecond ( 
+    CREATE TABLE IF NOT EXISTS alluserperiodsThirtySecond (
     id INT AUTO_INCREMENT PRIMARY KEY,
     IDOfUser BIGINT,
-    periodNumber VARCHAR(255) NOT NULL, 
+    periodNumber VARCHAR(255) NOT NULL,
     periodDate DATE NOT NULL,
-    betType ENUM('color'),
-    berforeBetAmount BIGINT NOT NULL,
-    betAmount BIGINT NOT NULL,
-    afterBetAmount BIGINT ,
-    status ENUM('win', 'lose')
-  );
+    betType VARCHAR(50),
+    berforeBetAmount DECIMAL(10,2) NOT NULL,
+    betAmount DECIMAL(10,2) NOT NULL,
+    afterBetAmount DECIMAL(10,2),
+    status ENUM('win', 'lose'),
+    possiblePayout DECIMAL(10,2)
+);
+
     `;
     await con.execute(createAllUserPeriodsTableThirtySecond);
     console.log("Table 'Thirty Second User Table' ensured in the database");
@@ -118,19 +122,34 @@ async function ensureTableExists() {
     const countPeriodAndTime = `
   CREATE TABLE IF NOT EXISTS countperiodandtime (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    periodNumber VARCHAR(255) NOT NULL,
+    periodNumber VARCHAR(255) NOT NULL, 
     periodTime Time NOT NULL, 
-    periodDate DATE NOT NULL
+    periodDate DATE NOT NULL,
+    countdown INT NOT NULL
   );
 `;
-await con.execute(countPeriodAndTime);
+
+    await con.execute(countPeriodAndTime);
+    console.log("countPeriodAndTime created");
+    const thirtySecondAmountCalculator = `
+    CREATE TABLE IF NOT EXISTS thirtySecondAmountCalculator (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    periodNumber VARCHAR(255) NOT NULL, 
+    color VARCHAR(50),
+    redColor INT,
+    greenColor INT ,
+    violetColor INT 
     
+  );
+`;
+    await con.execute(thirtySecondAmountCalculator);
+    console.log("Table thirtySecondAmountCalculator created");
 
     const createWithdrawHistory = `
     CREATE TABLE IF NOT EXISTS withdrawhistory (
     id INT AUTO_INCREMENT PRIMARY KEY,
     userId BIGINT NOT NULL,
-    amount DECIMAL(10, 2) NOT NULL ,
+    amount DECIMAL(10,2) NOT NULL ,
     withdrawDate DATE NOT NULL,
     status ENUM('approved', 'denied','pending') DEFAULT 'pending'
   );
@@ -385,7 +404,6 @@ app.post("/verify-email-otp", (req, res) => {
 
 app.post("/image-upload", async (req, res) => {
   const { userId, amount } = req.body;
-  console.log("hii", userId, amount);
   try {
     await con.execute(
       "INSERT INTO uploadimages (userId, amount) VALUES (?, ?)",
@@ -648,11 +666,6 @@ app.post("/api/withdrawals/accept", async (req, res) => {
       [id]
     );
 
-    await con.execute(
-      "UPDATE register SET balance = balance - ? WHERE IDOfUser = ?",
-      [withdrawal.amount, withdrawal.userId]
-    );
-
     res.status(200).send({ message: "Withdrawal accepted" });
   } catch (error) {
     console.error("Error accepting withdrawal:", error);
@@ -797,59 +810,23 @@ app.get("/api/invite/refer/:userId", async (req, res) => {
   }
 });
 
-app.post("/place-bet", async (req, res) => {
-  const {
-    userId,
-    periodNumber,
-    periodDate,
-    betType,
-    berforeBetAmount,
-    betAmount,
-  } = req.body;
-  console.log(
-    userId,
-    periodNumber,
-    periodDate,
-    betType,
-    berforeBetAmount,
-    betAmount
-  );
-
-  const newBalance = berforeBetAmount - betAmount;
-  try {
-    const [result] = await con.execute(
-      `INSERT INTO alluserperiodsThirtySecond (IDOfUser, periodNumber, periodDate, betType, berforeBetAmount, betAmount)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, periodNumber, periodDate, betType, berforeBetAmount, betAmount]
-    );
-    const [balanceResult] = await con.execute(
-      `UPDATE register SET balance = ? WHERE IDOfUser = ?`,
-      [newBalance, userId]
-    );
-    res
-      .status(200)
-      .json({ message: "Bet placed successfully", id: result.insertId });
-  } catch (error) {
-    console.error("Error placing bet:", error);
-    res.status(500).json({ error: "Error placing bet" });
-  }
-});
-
-app.post('/period-timer/post', async (req, res) => {
+app.post("/period-timer/post", async (req, res) => {
   const { periodNumber, periodDate } = req.body;
   try {
     const [result] = await con.execute(
       `INSERT INTO allperiodsthirtysecond (periodNumber, periodDate, colorWinner) VALUES (?, ?, ?)`,
-      [periodNumber, periodDate, '']
+      [periodNumber, periodDate, ""]
     );
-    res.status(200).json({ message: "Period submitted successfully", id: result.insertId });
+    res
+      .status(200)
+      .json({ message: "Period submitted successfully", id: result.insertId });
   } catch (err) {
     console.error("Error inserting period: ", err);
     res.status(500).json({ error: "Error inserting period" });
-  } 
-}); 
-   
-app.get('/period-timer', async (req, res) => {
+  }
+});
+
+app.get("/period-timer", async (req, res) => {
   try {
     const [rows] = await con.execute(
       `SELECT periodNumber FROM allperiodsthirtysecond ORDER BY periodNumber DESC LIMIT 1`
@@ -864,6 +841,311 @@ app.get('/period-timer', async (req, res) => {
     res.status(500).json({ error: "Error fetching periods" });
   }
 });
+
+// Endpoint to save countdown time
+app.post("/period-time", async (req, res) => {
+  const { periodNumber, periodTime, periodDate, countdown } = req.body;
+
+  try {
+    const [rows] = await con.query(
+      `INSERT INTO countperiodandtime (periodNumber, periodTime, periodDate, countdown) VALUES (?, ?, ?, ?)`,
+      [periodNumber, periodTime, periodDate, countdown]
+    );
+    res.status(200).json({ success: true, rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/period-time", async (req, res) => {
+  try {
+    const [rows] = await con.query(
+      `SELECT countdown FROM countperiodandtime ORDER BY id DESC LIMIT 1`
+    );
+    res.status(200).json(rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+// Assume you have a route set up like this
+
+app.get("/api/lastPeriodNumber", async (req, res) => {
+  try {
+    const query =
+      "SELECT periodNumber FROM allperiodsthirtysecond ORDER BY id DESC LIMIT 1";
+    const [result] = await con.query(query);
+
+    if (result.length > 0) {
+      const lastPeriodNumber = result[0].periodNumber;
+      console.log("Last periodNumber:", lastPeriodNumber);
+      res.json({ lastPeriodNumber });
+    } else {
+      console.log("No period numbers found in the database.");
+      res.status(404).json({ error: "No period numbers found" });
+    }
+  } catch (error) {
+    console.error("Error fetching last periodNumber:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/userBets/:periodNumber", async (req, res) => {
+  const { periodNumber } = req.params;
+
+  try {
+    const query =
+      "SELECT IDOfUser, betType AS color, betAmount AS amount FROM alluserperiodsthirtysecond WHERE periodNumber = ?";
+    const [result] = await con.query(query, [periodNumber]);
+
+    if (result.length > 0) {
+      res.json(result);
+    } else {
+      console.log(`No bets found for periodNumber: ${periodNumber}`);
+      res
+        .status(404)
+        .json({ error: `No bets found for periodNumber: ${periodNumber}` });
+    }
+  } catch (error) {
+    console.error("Error fetching user bets:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+const colorBetAmounts = {
+  Red: 0,
+  Violet: 0,
+  Green: 0,
+};
+app.post("/place-bet", async (req, res) => {
+  const {
+    userId,
+    periodNumber,
+    periodDate,
+    betType,
+    berforeBetAmount,
+    betAmount,
+    possiblePayout,
+  } = req.body;
+
+  if (colorBetAmounts[betType] !== undefined) {
+    colorBetAmounts[betType] += betAmount;
+  }
+  console.log(colorBetAmounts);
+
+  console.log(
+    "Bet placed:",
+    userId,
+    periodNumber,
+    periodDate,
+    betType,
+    berforeBetAmount,
+    betAmount,
+    possiblePayout
+  );
+
+  const newBalance = berforeBetAmount - betAmount;
+
+  try {
+    // Insert the bet into alluserperiodsthirtysecond table
+    const [result] = await con.execute(
+      `INSERT INTO alluserperiodsthirtysecond (IDOfUser, periodNumber, periodDate, betType, berforeBetAmount, betAmount,possiblePayout)
+       VALUES (?, ?, ?, ?, ?, ?,?)`,
+      [
+        userId,
+        periodNumber,
+        periodDate,
+        betType,
+        berforeBetAmount,
+        betAmount,
+        possiblePayout,
+      ]
+    );
+
+    // Update the user's balance
+    await con.execute(`UPDATE register SET balance = ? WHERE IDOfUser = ?`, [
+      newBalance,
+      userId,
+    ]);
+
+    res
+      .status(200)
+      .json({ message: "Bet placed successfully", id: result.insertId });
+  } catch (error) {
+    console.error("Error placing bet:", error);
+    res.status(500).json({ error: "Error placing bet" });
+  }
+});
+
+app.post("/update-amounts", async (req, res) => {
+  const { periodNumber } = req.body;
+
+  // Multiply the last updated amounts of red and green by 2, and violet by 4.5
+  const updatedRedAmount = colorBetAmounts.Red * 2;
+  const updatedGreenAmount = colorBetAmounts.Green * 2;
+  const updatedVioletAmount = colorBetAmounts.Violet * 4.5;
+
+  // Find the minimum value among red, green, and violet
+  let minColor;
+  let minValue;
+  if (
+    updatedRedAmount <= updatedGreenAmount &&
+    updatedRedAmount <= updatedVioletAmount
+  ) {
+    minColor = "Red";
+    minValue = updatedRedAmount;
+  } else if (
+    updatedGreenAmount <= updatedRedAmount &&
+    updatedGreenAmount <= updatedVioletAmount
+  ) {
+    minColor = "Green";
+    minValue = updatedGreenAmount;
+  } else {
+    minColor = "Violet";
+    minValue = updatedVioletAmount;
+  }
+  try {
+    await con.execute(
+      `INSERT INTO thirtysecondamountcalculator (periodNumber, redColor, greenColor, violetColor, color) VALUES (?, ?, ?, ?, ?)`,
+      [
+        periodNumber,
+        updatedRedAmount,
+        updatedGreenAmount,
+        updatedVioletAmount,
+        minColor,
+      ]
+    );
+
+    await con.execute(
+      `UPDATE allperiodsthirtysecond SET colorWinner = ? WHERE periodNumber = ?`,
+      [minColor, periodNumber]
+    );
+    await con.execute(
+      `UPDATE alluserperiodsthirtysecond SET win_color = ? WHERE periodNumber = ?`,
+      [minColor, periodNumber]
+    );
+
+    res.status(200).json({ message: "Amounts inserted successfully" });
+  } catch (error) {
+    console.error("Error inserting amounts:", error);
+    res.status(500).json({ error: "Error inserting amounts" });
+  }
+});
+app.post("/update-status", async (req, res) => {
+  const { periodNumber, periodDate } = req.body;
+
+  try {
+    // First, update the status
+    await con.execute(
+      `UPDATE alluserperiodsthirtysecond 
+       SET status = CASE 
+                      WHEN betType = win_color THEN 'win'
+                      ELSE 'lose'
+                    END
+       WHERE periodNumber = ? AND periodDate = ?`,
+      [periodNumber, periodDate]
+    );
+
+    // Then, fetch the users who won to update their balances
+    const [winners] = await con.execute(
+      `SELECT IDOfUser, possiblePayout 
+       FROM alluserperiodsthirtysecond 
+       WHERE periodNumber = ? AND periodDate = ? AND status = 'win'`,
+      [periodNumber, periodDate]
+    );
+
+    // Update the balance for each winner
+    for (const winner of winners) {
+      const { IDOfUser, possiblePayout } = winner;
+
+      await con.execute(
+        `UPDATE register 
+         SET balance = balance + ? 
+         WHERE IDOfUser = ?`,
+        [possiblePayout, IDOfUser]
+      );
+    }
+
+    res
+      .status(200)
+      .json({ message: "Status and balances updated successfully" });
+  } catch (error) {
+    console.error("Error updating status and balances:", error);
+    res.status(500).json({ error: "Error updating status and balances" });
+  }
+});
+
+app.get("/admin/thirty-second", async (req, res) => {
+  try {
+    const [entry] = await con.execute(
+      "SELECT * FROM thirtysecondamountcalculator"
+    );
+    res.status(200).json(entry);
+  } catch (error) {
+    console.error("Error fetching the latest entry:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.get("/admin/thirty-second/amount-calculator", async (req, res) => {
+  try {
+    const [entry] = await con.execute(
+      "SELECT * FROM thirtysecondamountcalculator ORDER BY id DESC LIMIT 1"
+    );
+    res.status(200).json(entry);
+  } catch (error) {
+    console.error("Error fetching the latest entry:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.get("/winner-api", async (req, res) => {
+  try {
+    const [winner] = await con.execute(
+      "SELECT * FROM thirtysecondamountcalculator ORDER BY id DESC LIMIT 1"
+    );
+    res.status(200).json(winner);
+  } catch (error) {
+    console.error("Error fetching the latest entry:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/admin/thirty-second-manual-calculator", async (req, res) => {
+  try {
+    const [entry] = await con.execute("SELECT * FROM countperiodandtime ORDER BY id DESC LIMIT 1");
+    res.status(200).json(entry[0]);
+  } catch (error) {
+    console.error("Error fetching the latest entry:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/alluserperiodsthirtysecond", async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const [rows] = await con.execute(
+      "SELECT IDOfUser, periodNumber, betType, betAmount, status FROM alluserperiodsthirtysecond WHERE IDOfUser = ? ORDER BY id DESC",
+      [userId]
+    );
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error("Error fetching 30-second history:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// app.get("/api/alluserperiodsthreeminute", async (req, res) => {
+//   try {
+//     const { userId } = req.query;
+//     const [rows] = await con.execute(
+//       "SELECT * FROM alluserperiodsthreeminute WHERE userId = ? ORDER BY id DESC",
+//       [userId]
+//     );
+//     res.status(200).json(rows);
+//   } catch (error) {
+//     console.error("Error fetching 3-minute history:", error);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
